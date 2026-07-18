@@ -10,8 +10,14 @@
 | R2  | Resistor — Rbottom  | 330 kΩ, 1% | 0805    | Any 1% metal-film 0805              |  1  |
 | R3  | Resistor — Gate p/u | 100 kΩ     | 0805    | Any standard 0805                   |  1  |
 | R4  | Resistor — Rled     | 2.2 kΩ     | 0805    | Any standard 0805                   |  1  |
+| C1  | Capacitor — bypass  | 100 nF, X7R | 0805  | Murata GRM21BR71E104KA01L, Samsung CL21B104KBCNNNC | 1 (opt) |
+| C2  | Capacitor — bulk    | 10 µF, X5R  | 0805  | Murata GRM21BC81A106KE18L, Samsung CL21A106KAYNNNE | 1 (opt) |
 
-**Total unique parts: 6**
+**Total unique parts: 6 (+ 2 optional decoupling capacitors)**
+
+> C1 and C2 are strongly recommended when the ESP32 is powered from a battery
+> circuit rather than USB. See `design-notes.md` — ADC Noise and Supply
+> Decoupling section for details and placement guidance.
 
 ---
 

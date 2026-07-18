@@ -61,20 +61,26 @@ the MOSFET is fully off.
 - **When MOSFET is OFF (U1 off):** both ends of R3 sit at BAT → **zero current
   through R3**. No standby leakage contribution from R3.
 - **When MOSFET is ON (U1 saturated):** gate is pulled toward GND, so current
-  flows through R3: I = 4.2 V / 100 kΩ = 42 µA. This is active operating
-  current, not standby leakage.
+  flows through R3. Theoretical estimate at 4.2 V: I = 4.2 V / 100 kΩ = 42 µA.
+  **In practice, measured total active current is ~8.4 µA at 4.0 V** — much
+  lower than theory predicts. The likely cause is that the PC817C Vce at the
+  very low collector current required here (~5–42 µA) is higher than the
+  datasheet Vce_sat (measured at IF = 10 mA). A higher Vce leaves GATE elevated
+  above GND, reducing the voltage across R3 and cutting R3 current
+  significantly. The net result is better than expected: lower active current
+  while Q1 still turns on fully (Vgs is still well below the threshold).
 
 ### Why not smaller (e.g. 10 kΩ)?
 
 Smaller R3 would require more collector current from U1 to pull the gate down.
-100 kΩ only needs 42 µA, which PC817C handles with an 18× margin. There is no
-benefit to forcing more current through R3.
+100 kΩ only needs a few µA (see measured value above), which PC817C handles
+easily. There is no benefit to forcing more current through R3.
 
 ### Can R3 be larger (e.g. 470 kΩ)?
 
-Yes. At 470 kΩ the pull-up current when ON drops to ~9 µA. U1 still has enough
-margin (see LED resistor section). Use 470 kΩ if minimising active current
-matters more than worst-case switching margin.
+Yes. At 470 kΩ the theoretical pull-up current when ON drops to ~9 µA and the
+real current would be even lower. U1 still has enough margin. Use 470 kΩ if
+minimising active current matters more than worst-case switching margin.
 
 ---
 
@@ -96,17 +102,20 @@ PC817C minimum CTR at IF = 1 mA (grade C): 80%.
 
 Current required to pull gate down through R3:
 
-    I_required = V_BAT / R3 = 4.2 V / 100 kΩ = 42 µA
+    I_required = V_BAT / R3 = 4.2 V / 100 kΩ = 42 µA  (theoretical worst case)
 
-Margin: 0.76 mA / 42 µA ≈ **18×**. U1 will fully saturate.
+In practice the measured R3 current is much lower (see R3 section), so the
+actual margin is far greater than the worst-case figure below.
+
+Margin (worst case): 0.76 mA / 42 µA ≈ **18×**. U1 will fully saturate.
 
 ### Acceptable range for R4
 
-| R4 value | I_LED  | I_collector_min | Margin over 42 µA |
-| -------- | ------ | --------------- | ----------------- |
-| 1.0 kΩ   | 2.1 mA | 1.68 mA         | 40×               |
-| 2.2 kΩ   | 0.95 mA| 0.76 mA         | 18× ← chosen      |
-| 4.7 kΩ   | 0.45 mA| 0.18 mA         | 4.3×              |
+| R4 value | I_LED   | I_collector_min | Margin over 42 µA (worst case) |
+| -------- | ------- | --------------- | ------------------------------ |
+| 1.0 kΩ   | 2.1 mA  | 1.68 mA         | 40×                            |
+| 2.2 kΩ   | 0.95 mA | 0.76 mA         | 18× ← chosen                  |
+| 4.7 kΩ   | 0.45 mA | 0.18 mA         | 4.3×                           |
 
 All values in the 1 kΩ – 4.7 kΩ range provide adequate margin. 2.2 kΩ balances
 GPIO loading and switching margin.
@@ -142,6 +151,54 @@ Vgs = GND − BAT = 0 − 4.2 = −4.2 V, well beyond the worst-case threshold o
 - U1 collector is at GATE = BAT ≈ 4.2 V
 - U1 emitter is at GND
 - Vce = 4.2 V — well within 35 V rating ✓
+
+---
+
+## ADC Noise and Supply Decoupling
+
+### Observed behaviour
+
+The ESP32-C3 ADC is susceptible to two noise sources when this module is in use:
+
+1. **BLE-correlated noise (USB power):** The RF transceiver injects switching
+   noise onto the 3.3 V rail during advertising and connection intervals.
+   Manifests as a ±25 mV spread at ADC_BAT (±60 mV on V_BAT, ±2–3%) even
+   when the battery voltage is perfectly stable.
+
+2. **Supply bias error (5 V pin power):** When the ESP32 is powered from a
+   battery management circuit via its 5 V pin rather than a PC USB port, the
+   higher-impedance supply allows BLE switching transients to momentarily pull
+   the 3.3 V LDO output below nominal. Because the ADC uses VDD as its
+   reference, every reading is biased proportionally low — a systematic
+   under-read of ~15–20% was observed in practice.
+
+### Software mitigation
+
+- Oversample: take ≥32 samples per measurement and average them.
+- Only report a new BLE battery level when the rounded percentage changes
+  (avoids tray-icon flicker from ±1% jitter).
+
+### Hardware fix (recommended)
+
+Add two decoupling capacitors in parallel between the ESP32’s 3.3 V rail and
+GND, placed as close to the VDD/3.3 V pin as possible:
+
+| Ref | Value  | Dielectric | Package | Voltage | Purpose                        |
+| --- | ------ | ---------- | ------- | ------- | ------------------------------ |
+| C1  | 100 nF | X7R MLCC   | 0805    | ≥10 V   | High-frequency bypass (BLE RF) |
+| C2  | 10 µF  | X5R MLCC   | 0805    | ≥10 V   | Bulk charge reservoir          |
+
+The 100 nF handles fast (MHz-range) transients from the radio; the 10 µF
+provides charge during slower supply variations.
+
+### Candidate parts
+
+| Ref | Manufacturer | Part number        | Package | Dielectric | Voltage |
+| --- | ------------ | ------------------ | ------- | ---------- | ------- |
+| C1  | Murata       | GRM21BR71E104KA01L | 0805    | X7R        | 25 V    |
+| C1  | Samsung      | CL21B104KBCNNNC    | 0805    | X7R        | 25 V    |
+| C2  | Murata       | GRM21BC81A106KE18L | 0805    | X5R        | 10 V    |
+| C2  | Samsung      | CL21A106KAYNNNE    | 0805    | X5R        | 10 V    |
 
 ---
 
